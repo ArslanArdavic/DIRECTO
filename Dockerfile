@@ -6,11 +6,8 @@ RUN apt-get update && apt-get install -y \
     wget git build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Replace Miniconda with Miniforge. Miniforge ships with mamba pre-installed
-# in the base environment and defaults to conda-forge, so there is no separate
-# mamba installation step needed — it is simply ready to use immediately after
-# the installer runs. This eliminates the circular problem of needing conda's
-# slow solver to install conda's fast solver replacement.
+# Miniforge ships with mamba pre-installed and defaults to conda-forge,
+# eliminating the circular problem of needing conda to install mamba.
 RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
         -O /tmp/miniforge.sh && \
     bash /tmp/miniforge.sh -b -p /opt/conda && \
@@ -27,9 +24,8 @@ RUN sed -i '/^\s*- e \./d' environment.yaml
 # environment is built correctly from the start
 RUN sed -i 's/numpy==2\.3\.1/numpy<2.0/' environment.yaml
 
-# Now we can call mamba directly — no installation step needed because
-# Miniforge already provides it. The --verbose flag ensures that if this
-# step fails, the build log shows exactly which package caused the failure.
+# Create the conda environment via mamba.
+# --verbose ensures failures show exactly which package caused the problem.
 RUN mamba env create -f environment.yaml --verbose && \
     mamba clean -afy && \
     conda clean -afy && \
@@ -37,6 +33,27 @@ RUN mamba env create -f environment.yaml --verbose && \
     find /opt/conda -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
 SHELL ["conda", "run", "-n", "directo", "/bin/bash", "-c"]
+
+# Force-reinstall PyTorch with explicit CUDA 12.1 build.
+# mamba env create may silently install a CPU-only PyTorch when running on
+# GPU-less hardware (e.g. GitHub Actions runners), because the solver has no
+# GPU to validate against. This step overrides whatever was installed and
+# guarantees the CUDA 12.1 build is present regardless of build environment.
+RUN conda install -y pytorch=2.4.0 pytorch-cuda=12.1 -c pytorch -c nvidia && \
+    conda clean -afy
+
+# Assert that the CUDA build of PyTorch is actually installed.
+# torch.version.cuda being None means a CPU-only build was installed.
+# Failing here at build time prevents a CPU-only image from ever being
+# pushed to the registry and reaching the cluster silently.
+RUN python -c "
+import torch
+assert torch.version.cuda is not None, (
+    'CPU-only PyTorch installed (torch.version.cuda=None). '
+    'The conda solver chose the CPU build — check channel priorities.'
+)
+print(f'PyTorch {torch.__version__} compiled against CUDA {torch.version.cuda} — OK')
+"
 
 # Problem 2+3 fix: editable install
 RUN pip install --upgrade pip && pip install -e .
