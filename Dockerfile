@@ -39,7 +39,12 @@ SHELL ["conda", "run", "-n", "directo", "/bin/bash", "-c"]
 # GPU-less hardware (e.g. GitHub Actions runners), because the solver has no
 # GPU to validate against. This step overrides whatever was installed and
 # guarantees the CUDA 12.1 build is present regardless of build environment.
-RUN conda install -y pytorch=2.4.0 pytorch-cuda=12.1 -c pytorch -c nvidia && \
+RUN conda run -n directo conda install -y \
+    --override-channels \
+    -c pytorch \
+    -c nvidia \
+    pytorch=2.4.0 \
+    pytorch-cuda=12.1 && \
     conda clean -afy
 
 # Assert that the CUDA build of PyTorch is actually installed.
