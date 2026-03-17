@@ -32,4 +32,3 @@ dependencies:
       - seaborn==0.13.2
       - gpustat==0.6.0
       - black==24.3.0
-      - e .

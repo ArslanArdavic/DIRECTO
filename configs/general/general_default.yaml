@@ -29,3 +29,4 @@ evaluate_all_checkpoints: False
 num_sample_fold: 1
 save_samples: False
 save_visualization: True
+conditional: False

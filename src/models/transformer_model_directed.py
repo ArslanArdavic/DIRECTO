@@ -537,7 +537,7 @@ class GraphTransformerDirected(nn.Module):
 
         # self.spe_q_dim = spe_dims["q_dim"] if pos_enc == "spe" else 0
         # self.spe_pe_dim = spe_dims["pe_dim"] if pos_enc == "spe" else 0
-        # self.spe_out_dim = spe_dims["out_dim"] if pos_enc == "spe" else 0
+        self.spe_out_dim = spe_dims["out_dim"] if pos_enc == "spe" else 0
 
         self.mlp_in_X = nn.Sequential(
             nn.Linear(input_dims["X"] + self.spe_out_dim, hidden_mlp_dims["X"]),

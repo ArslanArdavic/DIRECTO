@@ -1,0 +1,5 @@
+/directo.egg-info/
+/outputs/
+/data/
+*/__pycache__/
+**/*/__pycache__/
