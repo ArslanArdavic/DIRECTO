@@ -5,7 +5,7 @@
 # a fully functional graph-tool + Python 3.10 environment on Ubuntu 22.04.
 # We then install the CUDA toolkit on top of this base, rather than trying to
 # install graph-tool on top of the CUDA base (which is fragile and error-prone).
-FROM registry.skewed.de/graph-tool/graph-tool:latest
+FROM tiagopeixoto/graph-tool:latest
 
 ENV DEBIAN_FRONTEND=noninteractive
 
