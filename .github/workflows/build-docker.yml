@@ -1,0 +1,79 @@
+name: Build and Push Docker Image
+
+# ── Trigger ───────────────────────────────────────────────────────────────────
+# Only runs when you explicitly click "Run workflow" in the Actions tab.
+# No automatic triggers — every build is a deliberate decision, which is
+# appropriate here because builds are expensive (~30-45 min first time).
+on:
+  workflow_dispatch:
+
+# ── Permissions ───────────────────────────────────────────────────────────────
+# The automatic GITHUB_TOKEN only has read access by default.
+# We need write access on packages to push the image to ghcr.io.
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    # GitHub's standard Ubuntu runner. No GPU needed to build the image —
+    # CUDA libraries are installed as regular files inside the image and only
+    # require a real GPU when the container actually runs on the cluster.
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Clone your repository onto the GitHub Actions runner VM so the
+      # Dockerfile, environment.yaml, and source code are available to the build.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Docker Buildx, an extended build backend that enables
+      # the GitHub Actions cache (type=gha) used in the final step.
+      # Without this, layer caching across workflow runs is not available.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Step 3: Authenticate with GitHub Container Registry using the automatic
+      # GITHUB_TOKEN. This token is scoped to your repository, expires after
+      # the run, and requires no manual creation or rotation.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 4: Generate image tags from git context.
+      # Two tags are produced for every manual build:
+      #   - latest:          always points to the most recent manual build,
+      #                      which is what the SLURM script references
+      #   - manual-<sha>:    records the exact commit this image was built from,
+      #                      useful for tracing an old image back to its source code
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/directo
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=manual-
+
+      # Step 5: Build the image and push it to ghcr.io.
+      # The cache-from / cache-to directives store Docker's layer cache in
+      # GitHub's built-in cache storage (type=gha). This means:
+      #   - First build:  30-45 minutes (conda env creation dominates)
+      #   - Subsequent builds after a code-only change: 3-5 minutes
+      #     (all conda/pip layers hit the cache; only the COPY and
+      #     pip install -e . layers need to re-run)
+      #   - After changing environment.yaml: full rebuild, because the
+      #     conda env create layer is invalidated and everything after it
+      #     must be re-executed — which is the correct and safe behaviour.
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
