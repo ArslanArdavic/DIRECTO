@@ -34,33 +34,35 @@ RUN mamba env create -f environment.yaml --verbose && \
 
 SHELL ["conda", "run", "-n", "directo", "/bin/bash", "-c"]
 
-# Force-reinstall PyTorch with explicit CUDA 12.1 build.
-# mamba env create may silently install a CPU-only PyTorch when running on
-# GPU-less hardware (e.g. GitHub Actions runners), because the solver has no
-# GPU to validate against. This step overrides whatever was installed and
-# guarantees the CUDA 12.1 build is present regardless of build environment.
-RUN conda install -y \
-    --override-channels \
-    -c pytorch \
-    -c nvidia \
-    pytorch=2.4.0 \
-    pytorch-cuda=12.1 && \
-    conda clean -afy
+# Force-install PyTorch CUDA 12.1 via pip using PyTorch's official wheel server.
+# conda's solver probes for GPU hardware at install time and silently selects
+# the CPU-only build when running on GPU-less hardware such as GitHub Actions
+# runners. pip's wheel selection is based purely on the index URL — pointing it
+# at the cu121 wheel server guarantees the CUDA build unconditionally regardless
+# of what hardware is present at build time.
+# We uninstall first to remove whatever build conda placed during env creation.
+RUN pip uninstall -y torch torchvision torchaudio 2>/dev/null || true && \
+    pip install \
+        torch==2.4.0+cu121 \
+        torchvision==0.19.0+cu121 \
+        --extra-index-url https://download.pytorch.org/whl/cu121
 
-# Assert that the CUDA build of PyTorch is actually installed.
-# torch.version.cuda being None means a CPU-only build was installed.
-# Failing here at build time prevents a CPU-only image from ever being
-# pushed to the registry and reaching the cluster silently.
-RUN python -c "import torch; assert torch.version.cuda is not None, 'CPU-only PyTorch installed — conda solver chose the CPU build, check channel priorities.'; print(f'PyTorch {torch.__version__} compiled against CUDA {torch.version.cuda} — OK')"
-
+# Assert that the CUDA build is actually installed.
+# Fails the Docker build immediately if a CPU-only build ended up installed,
+# preventing a broken image from ever being pushed to the registry.
+RUN python -c "import torch; assert torch.version.cuda is not None, 'CPU-only PyTorch — check wheel URL'; print(f'PyTorch {torch.__version__} | CUDA {torch.version.cuda} — OK')"
 
 # Problem 2+3 fix: editable install
 RUN pip install --upgrade pip && pip install -e .
 
-# Problem 4 fix: install DGL explicitly from the correct channel
+# Problem 4 fix: install DGL explicitly from the correct channel.
+# No 'conda run -n directo' prefix needed — the SHELL directive above already
+# executes every RUN command inside the directo environment. Adding it would
+# cause double-nesting and a conda-inside-conda failure.
 RUN conda install -y -c dglteam/label/th24_cu121 dgl && conda clean -afy
 
-# Build-time verification
+# Build-time verification — each line prints the installed version so the
+# build log serves as a permanent record of what is inside this image.
 RUN python -c "import torch; print('torch', torch.__version__)"
 RUN python -c "import dgl; print('dgl', dgl.__version__)"
 RUN python -c "import graph_tool; print('graph_tool', graph_tool.__version__)"
