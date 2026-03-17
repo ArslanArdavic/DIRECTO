@@ -1,0 +1,60 @@
+# ── PyTorch with CUDA 12.1 ────────────────────────────────────────────────────
+# PyTorch publishes per-CUDA-version wheels at a dedicated index URL.
+# This is the pip equivalent of conda's 'pytorch' and 'nvidia' channels.
+# We install via --extra-index-url in the Dockerfile rather than listing the
+# URL here, because requirements.txt does not support index URL directives
+# cleanly when mixing with regular PyPI packages.
+torch==2.4.0
+torchvision==0.19.0
+
+# ── PyTorch Geometric ──────────────────────────────────────────────────────────
+# The base package installs from PyPI. The optional compiled extensions
+# (torch-scatter, torch-sparse, etc.) are installed separately in the
+# Dockerfile via PyG's wheel server, keyed to our exact torch+cuda version.
+torch_geometric==2.3.1
+
+# ── Core scientific stack ──────────────────────────────────────────────────────
+# numpy is pinned to <2.0 rather than ==2.3.1 from environment.yaml.
+# This is Problem 7's fix: PyTorch Lightning 2.0.4 uses np.Inf which was
+# removed in NumPy 2.0. NumPy 1.26.4 is the last stable 1.x release and is
+# fully compatible with every other package in this stack.
+numpy<2.0
+scipy==1.16.0
+pandas==2.3.0
+
+# ── Graph libraries ────────────────────────────────────────────────────────────
+# graph-tool is intentionally absent here — it is installed at the system
+# level via apt-get in the Dockerfile and symlinked into the venv.
+# networkx is the pure-Python graph library used alongside graph-tool.
+networkx==3.5
+PyGSP==0.5.1
+
+# ── Deep learning framework and utilities ──────────────────────────────────────
+# pytorch-lightning version must stay at 2.0.4 — this is what the DIRECTO
+# codebase was written and tested against.
+pytorch-lightning==2.0.4
+torchmetrics==0.11.4
+
+# ── Hydra configuration system ─────────────────────────────────────────────────
+hydra-core==1.3.2
+omegaconf==2.3.0
+
+# ── Chemistry and molecular graph support ─────────────────────────────────────
+# rdkit is now available on PyPI since the 2022 releases — no conda needed.
+rdkit
+
+# ── Visualisation and logging ──────────────────────────────────────────────────
+matplotlib==3.10.3
+seaborn==0.13.2
+imageio==2.31.1
+wandb==0.20.1
+
+# ── Development and notebook tooling ──────────────────────────────────────────
+ipykernel==6.29.5
+tqdm==4.65.0
+gpustat==0.6.0
+black==24.3.0
+
+# ── Miscellaneous dependencies ─────────────────────────────────────────────────
+overrides==7.3.1
+setuptools==68.0.0
