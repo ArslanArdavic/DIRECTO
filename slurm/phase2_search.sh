@@ -42,7 +42,7 @@ conda run --no-capture-output -n directo \
         general.test_only=$CHECKPOINT \
         general.wandb=online \
         sample.search=all \
-        "hydra.run.dir=/stratch/arda.arslan/directo/outputs/\${now:%Y-%m-%d}/\${now:%H-%M-%S}-er-dag-search"
+        "hydra.run.dir=/users/arda.arslan/allab/DIRECTO/outputs/\${now:%Y-%m-%d}/\${now:%H-%M-%S}-er-dag-search"
 
 echo "Phase 2 finished at: $(date)"
 echo "Read search_hyperparameters.csv in the output directory, then update BEST_* in phase3_eval.sh"

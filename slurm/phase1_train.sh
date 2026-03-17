@@ -29,7 +29,7 @@ conda run --no-capture-output -n directo \
         dataset.acyclic=True \
         model.extra_features=magnetic-eigenvalues \
         general.wandb=online \
-        "hydra.run.dir=/stratch/arda.arslan/directo/outputs/\${now:%Y-%m-%d}/\${now:%H-%M-%S}-er-dag-maglap"
+        "hydra.run.dir=/users/arda.arslan/allab/DIRECTO/outputs/\${now:%Y-%m-%d}/\${now:%H-%M-%S}-er-dag-maglap"
 
 echo "Phase 1 finished at: $(date)"
 echo "Outputs written to /stratch/arda.arslan/directo/outputs/"

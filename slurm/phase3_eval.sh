@@ -52,7 +52,7 @@ conda run --no-capture-output -n directo \
         sample.eta=$BEST_ETA \
         sample.omega=$BEST_OMEGA \
         sample.time_distortion=$BEST_DISTORTION \
-        "hydra.run.dir=/stratch/arda.arslan/directo/outputs/\${now:%Y-%m-%d}/\${now:%H-%M-%S}-er-dag-eval"
+        "hydra.run.dir=/users/arda.arslan/allab/DIRECTO/outputs/\${now:%Y-%m-%d}/\${now:%H-%M-%S}-er-dag-eval"
 
 echo "Phase 3 finished at: $(date)"
 echo "Final metrics written to test_epoch*_res_*.txt — compare against Table 1."
