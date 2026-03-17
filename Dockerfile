@@ -46,14 +46,8 @@ RUN conda install -y pytorch=2.4.0 pytorch-cuda=12.1 -c pytorch -c nvidia && \
 # torch.version.cuda being None means a CPU-only build was installed.
 # Failing here at build time prevents a CPU-only image from ever being
 # pushed to the registry and reaching the cluster silently.
-RUN python -c "
-import torch
-assert torch.version.cuda is not None, (
-    'CPU-only PyTorch installed (torch.version.cuda=None). '
-    'The conda solver chose the CPU build — check channel priorities.'
-)
-print(f'PyTorch {torch.__version__} compiled against CUDA {torch.version.cuda} — OK')
-"
+RUN python -c "import torch; assert torch.version.cuda is not None, 'CPU-only PyTorch installed — conda solver chose the CPU build, check channel priorities.'; print(f'PyTorch {torch.__version__} compiled against CUDA {torch.version.cuda} — OK')"
+
 
 # Problem 2+3 fix: editable install
 RUN pip install --upgrade pip && pip install -e .
