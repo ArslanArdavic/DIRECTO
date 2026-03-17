@@ -1,68 +1,95 @@
 # ── Base image ────────────────────────────────────────────────────────────────
-# We start from graph-tool's official Docker image rather than NVIDIA's CUDA
-# image. This is the most reliable way to get a working graph-tool installation
-# — the image is maintained by graph-tool's own authors and already contains
-# a fully functional graph-tool + Python 3.10 environment on Ubuntu 22.04.
-# We then install the CUDA toolkit on top of this base, rather than trying to
-# install graph-tool on top of the CUDA base (which is fragile and error-prone).
-FROM tiagopeixoto/graph-tool:latest
+# We start from NVIDIA's official CUDA 12.1 image with cuDNN 8 and the full
+# development toolkit on Ubuntu 22.04. Conda manages graph-tool, PyTorch, and
+# the full Python environment — this is the most reliable path because both
+# graph-tool and PyTorch publish carefully maintained conda packages that are
+# guaranteed to be mutually compatible.
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ── CUDA 12.1 toolkit ────────────────────────────────────────────────────────
-# Add NVIDIA's apt repository and install the CUDA 12.1 toolkit and cuDNN 8.
-# We install the runtime libraries (not the full development toolkit) since
-# pip-distributed PyTorch wheels bundle their own CUDA runtime and only need
-# the driver-facing libraries to communicate with the GPU.
-# The keyring package is required to authenticate NVIDIA's apt repository.
-RUN apt-get update && apt-get install -y wget && \
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
-    dpkg -i cuda-keyring_1.1-1_all.deb && \
-    apt-get update && apt-get install -y \
-        cuda-toolkit-12-1 \
-        libcudnn8 \
-        python3-dev \
-        python3-pip \
-        git \
-        build-essential \
-    && rm -rf /var/lib/apt/lists/* cuda-keyring_1.1-1_all.deb
+# ── System utilities ───────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y \
+    wget git build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set CUDA-related environment variables so PyTorch can discover the GPU
-# at runtime and pip-compiled CUDA extensions know where to find the headers.
-ENV CUDA_HOME=/usr/local/cuda
-ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+# ── Miniconda ─────────────────────────────────────────────────────────────────
+# We install Miniconda because graph-tool has no PyPI distribution and is only
+# reliably available as a conda-forge package. Conda also manages the PyTorch
+# and CUDA libraries, ensuring all native binaries are built against compatible
+# runtime versions.
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
+        -O /tmp/miniconda.sh && \
+    bash /tmp/miniconda.sh -b -p /opt/conda && \
+    rm /tmp/miniconda.sh
+ENV PATH="/opt/conda/bin:$PATH"
 
-# ── Copy requirements before source code ──────────────────────────────────────
-# requirements.txt is copied before the full source to exploit Docker's layer
-# cache — the expensive pip install below only re-runs when requirements.txt
-# actually changes, not on every code commit.
+# ── Mamba ─────────────────────────────────────────────────────────────────────
+# Mamba is a drop-in replacement for conda's solver written in C++. It resolves
+# large dependency graphs (like PyTorch + CUDA + graph-tool spanning multiple
+# channels) dramatically faster and with lower memory usage than conda's default
+# Python solver. This is critical on GitHub Actions where the runner has limited
+# memory and a time budget. Without mamba, conda's solver can exhaust memory or
+# time out on this environment, producing a misleading exit code 1.
+RUN conda install -n base -c conda-forge mamba -y && conda clean -afy
+
+# ── Copy project files ─────────────────────────────────────────────────────────
 WORKDIR /workspace
-COPY requirements.txt .
-
-# ── Python packages via pip ────────────────────────────────────────────────────
-# Install directly into the system Python — no venv needed inside a container.
-# PyTorch and DGL are fetched from their own CUDA-specific wheel servers rather
-# than PyPI, via the --extra-index-url flags.
-RUN pip install --break-system-packages --upgrade pip && \
-    pip install --break-system-packages \
-        --extra-index-url https://download.pytorch.org/whl/cu121 \
-        --extra-index-url https://data.dgl.ai/wheels/torch-2.4/cu121/repo.html \
-        -r requirements.txt
-
-# ── Copy source and install in editable mode ──────────────────────────────────
 COPY . .
-RUN pip install --break-system-packages -e .
+
+# ── Problem 1 fix: remove invalid pip entry ───────────────────────────────────
+# The '- e .' line in environment.yaml is not valid syntax for conda's pip
+# integration. We remove it so conda env create runs without errors.
+# This sed command is a no-op if the line was already removed in the repo.
+RUN sed -i '/^\s*- e \./d' environment.yaml
+
+# ── Problem 7 fix: pin NumPy before env creation ──────────────────────────────
+# environment.yaml pins numpy==2.3.1, which is incompatible with PyTorch
+# Lightning 2.0.4 because NumPy 2.0 removed the np.Inf alias. We rewrite the
+# pin to <2.0 directly in the YAML so the environment is created correctly
+# from the start rather than requiring a post-hoc downgrade.
+RUN sed -i 's/numpy==2\.3\.1/numpy<2.0/' environment.yaml
+
+# ── Create the conda environment ──────────────────────────────────────────────
+# This is the heaviest step — it installs PyTorch 2.4, CUDA libraries,
+# graph-tool, and all pip dependencies. Docker's layer cache means this only
+# re-runs when environment.yaml changes; routine code commits skip it entirely.
+# --verbose ensures that if this step fails, the log shows exactly which package
+# caused the failure rather than an opaque exit code 1.
+RUN mamba env create -f environment.yaml --verbose && \
+    mamba clean -afy && \
+    conda clean -afy && \
+    find /opt/conda -name "*.pyc" -delete && \
+    find /opt/conda -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
+# Make the directo environment the default shell for subsequent RUN steps.
+SHELL ["conda", "run", "-n", "directo", "/bin/bash", "-c"]
+
+# ── Problem 2+3 fix: editable install ─────────────────────────────────────────
+# Upgrade pip first — older pip versions don't support pyproject.toml editable
+# installs and require a setup.py. The upgraded pip handles pyproject.toml
+# correctly, registering src/ on the Python path so internal imports resolve.
+RUN pip install --upgrade pip && pip install -e .
+
+# ── Problem 4 fix: install DGL explicitly ─────────────────────────────────────
+# DGL is silently omitted by conda's solver when resolving the dglteam channel.
+# We install it in a separate step after the environment exists, using the
+# channel tag that encodes our exact PyTorch 2.4 + CUDA 12.1 combination.
+# -y suppresses the confirmation prompt that would hang a non-interactive build.
+RUN conda install -y -c dglteam/label/th24_cu121 dgl && conda clean -afy
 
 # ── Build-time verification ────────────────────────────────────────────────────
-# These import checks run during the build so any environment problem surfaces
-# as a build failure rather than a mysterious SLURM job failure later.
-RUN python3 -c "import torch; print('torch', torch.__version__)"
-RUN python3 -c "import dgl; print('dgl', dgl.__version__)"
-RUN python3 -c "import graph_tool; print('graph_tool', graph_tool.__version__)"
-RUN python3 -c "import pytorch_lightning; print('lightning', pytorch_lightning.__version__)"
-RUN python3 -c "import numpy; print('numpy', numpy.__version__)"
+# Import checks during the build surface environment problems immediately
+# rather than hours later as a mysterious SLURM job failure on the cluster.
+RUN python -c "import torch; print('torch', torch.__version__)"
+RUN python -c "import dgl; print('dgl', dgl.__version__)"
+RUN python -c "import graph_tool; print('graph_tool', graph_tool.__version__)"
+RUN python -c "import pytorch_lightning; print('lightning', pytorch_lightning.__version__)"
+RUN python -c "import numpy; print('numpy', numpy.__version__)"
 
 # ── Runtime working directory ──────────────────────────────────────────────────
+# main.py must run from inside src/ because Hydra resolves config paths
+# relative to the working directory at launch time.
 WORKDIR /workspace/src
 
-CMD ["bash"]
+CMD ["conda", "run", "--no-capture-output", "-n", "directo", "bash"]
