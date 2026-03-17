@@ -17,6 +17,15 @@ echo "Start time : $(date)"
 
 nvidia-smi || { echo "ERROR: nvidia-smi failed — GPU not visible. Aborting."; exit 1; }
 
+echo "--- PyTorch level ---"
+conda run --no-capture-output -n directo python -c "
+import torch
+print(f'PyTorch version : {torch.__version__}')
+print(f'CUDA available  : {torch.cuda.is_available()}')
+print(f'CUDA version    : {torch.version.cuda}')
+print(f'Device count    : {torch.cuda.device_count()}')
+print(f'Device name     : {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')
+"
 
 # WANDB_API_KEY is read from the environment set in ~/.bashrc on the server.
 # It is injected into the container via Pyxis's environment passthrough.
